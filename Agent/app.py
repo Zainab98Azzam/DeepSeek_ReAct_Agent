@@ -5,11 +5,13 @@ from typing import List, Dict
 from .agent import Agent
 from .AgentTools.search_agent import SearchAgent
 from .AgentTools.writing_agent import WritingAgent
+from .AgentTools.medical_agent import MedicalAgent
 
-# Add the WritingAgent back to the tools list
+
 tools_list = [
     SearchAgent(),
-    WritingAgent()
+    WritingAgent(),
+    MedicalAgent()
 ]
 agent = Agent(tools=tools_list)
 app = FastAPI()

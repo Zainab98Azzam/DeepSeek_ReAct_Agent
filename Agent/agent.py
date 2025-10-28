@@ -57,40 +57,42 @@ class Agent:
 
 
     def format_tools_for_deepseek(self):
-        """Format tools for DeepSeek API function calling."""
-        tools_list = []
-        for name, tool in self.tools.items():
-            docstring = tool.use.__doc__.strip() if tool.use.__doc__ else "No documentation provided."
-            
-            # Define parameters based on the tool's purpose
-            if name == "SearchAgent":
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The search query."}
-                    },
-                    "required": ["query"]
-                }
-            elif name == "WritingAgent":
-                parameters = {
-                    "type": "object",
-                    "properties": {
-                        "notes": {"type": "string", "description": "The research notes to use for writing."}
-                    },
-                    "required": ["notes"]
-                }
-            else:
-                parameters = {"type": "object", "properties": {}, "required": []}
-            
-            tools_list.append({
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": docstring,
-                    "parameters": parameters
-                }
-            })
-        return tools_list
+            """Format tools for DeepSeek API function calling."""
+            tools_list = []
+            for name, tool in self.tools.items():
+                docstring = tool.use.__doc__.strip() if tool.use.__doc__ else "No documentation provided."
+                
+                # Define parameters based on the tool's purpose
+                # ADDED: MedicalAgent now shares the 'query' parameter structure
+                if name in ["SearchAgent", "MedicalAgent"]:
+                    parameters = {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "The search query."}
+                        },
+                        "required": ["query"] 
+                    }
+                elif name == "WritingAgent":
+                    parameters = {
+                        "type": "object",
+                        "properties": {
+                            "notes": {"type": "string", "description": "The research notes to use for writing."}
+                        },
+                        "required": ["notes"]
+                    }
+                # Note: If PDFGeneratorAgent is registered in app.py, you would need to add its parameter logic here as well.
+                else:
+                    parameters = {"type": "object", "properties": {}, "required": []}
+                
+                tools_list.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": docstring,
+                        "parameters": parameters
+                    }
+                })
+            return tools_list
 
     def add_message(self, role: str, content: str):
         """Add a message to the conversation history."""
@@ -116,6 +118,8 @@ class Agent:
         else:
             return self._handle_final_answer(response)
     
+    # In Agent/agent.py (around line 140)
+
     def _handle_tool_calls(self, response, tool_calls) -> str:
         """Handle tool calls from the API response."""
         # Add the assistant's response (with tool calls) to the chat history
@@ -139,10 +143,19 @@ class Agent:
                 tool_instance = self.tools[tool_name]
                 observation = tool_instance.use(**tool_args)
 
-                if tool_name == "SearchAgent":
+                # FIX: Route both research agents to the same handler
+                if tool_name in ["SearchAgent", "MedicalAgent"]:
                     return self._handle_search_agent(observation, tool_id)
+                
                 elif tool_name == "WritingAgent":
                     return self._handle_writing_agent(observation, tool_id)
+                
+                # Fallback for any other tool: Log the observation
+                self.messages.append({
+                    "role": "tool",
+                    "content": observation,
+                    "tool_call_id": tool_id
+                })
         
         return "loop"
     
@@ -159,7 +172,7 @@ class Agent:
         if self.search_count >= self.MAX_SEARCHES:
             self.messages.append({
                 "role": "user",
-                "content": "The search is complete. Please use the WritingAgent to create a professional report based on the provided results. Do not perform any further searches."
+                "content": "The search is complete. Please use the WritingAgent to cre m   hhhhate a professional report based on the provided results. Do not perform any further searches."
             })
         
         return "loop"
@@ -184,22 +197,46 @@ class Agent:
 
 
 
+   # In Agent/agent.py
+
     def run(self, query: str) -> str:
         """Run the agent with a given query."""
         self.add_message("user", query)
-
-        for _ in range(self.MAX_ITERATIONS):
+        # ADDED: Print a header to organize the output
+        print("\n--- AGENT EXECUTION TRACE ---") 
+        
+        for i in range(self.MAX_ITERATIONS): # Use 'i' for iteration count
+            
+            # Print the current step number
+            print(f"\n--- STEP {i+1} / {self.MAX_ITERATIONS} ---") 
+            
             response = self.think()
+            
+            # ADDED: Print the LLM's raw thought/response content
+            print(f"Thought/Content: {response.content}") 
+            
+            # ADDED: Check if the LLM chose a tool
+            if response.tool_calls:
+                for tool_call in response.tool_calls:
+                    print(f"Action/Tool Call: {tool_call.function.name}")
+                    print(f"Arguments: {tool_call.function.arguments}")
+            
             result = self.decide(response)
             
             if result == "loop":
+                # ADDED: Print the result of the action (the observation)
+                # Note: We won't print the full observation here as it's too long, 
+                # but we confirm the tool ran successfully.
+                print("Observation: Tool executed successfully. Looping to next step.") 
                 continue
             
             if result and result.startswith("Final Answer:"):
+                # ADDED: Print a clean footer before returning
+                print("--- TRACE COMPLETE ---\n") 
                 return result.replace("Final Answer:", "").strip()
 
+        print("--- TRACE FAILED ---\n")
         return "The agent failed to find a final answer after multiple attempts."
-    
     
     def clear_history(self):
         """Clear the agent's chat history."""
